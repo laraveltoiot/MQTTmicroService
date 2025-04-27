@@ -1,0 +1,232 @@
+package config
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"strconv"
+	"strings"
+
+	"github.com/joho/godotenv"
+)
+
+// BrokerConfig holds the configuration for a single MQTT broker
+type BrokerConfig struct {
+	Name         string
+	Host         string
+	Port         int
+	ClientID     string
+	CleanSession bool
+	EnableLogging bool
+	LogChannel   string
+	TLSEnabled   bool
+	TLSVerifyPeer bool
+	TLSCAFile    string
+	Username     string
+	Password     string
+}
+
+// DatabaseConfig holds the configuration for the database
+type DatabaseConfig struct {
+	// Type is the type of database to use (sqlite or mongodb)
+	Type string
+	// Connection is the connection string for the database
+	Connection string
+	// MongoDB specific settings
+	MongoDB struct {
+		URI      string
+		Database string
+		Username string
+		Password string
+		Port     int
+	}
+	// SQLite specific settings
+	SQLite struct {
+		Path string
+	}
+}
+
+// Config holds the configuration for the MQTT microservice
+type Config struct {
+	DefaultConnection string
+	Brokers           map[string]*BrokerConfig
+	// API key authentication
+	EnableAPIKey      bool
+	APIKeys           []string
+	// Database configuration
+	Database          *DatabaseConfig
+}
+
+// LoadConfig loads the configuration from environment variables
+func LoadConfig() (*Config, error) {
+	// Load .env file if it exists
+	_ = godotenv.Load()
+
+	config := &Config{
+		Brokers: make(map[string]*BrokerConfig),
+		Database: &DatabaseConfig{},
+	}
+
+	// Get default connection
+	config.DefaultConnection = os.Getenv("MQTT_DEFAULT_CONNECTION")
+	if config.DefaultConnection == "" {
+		return nil, errors.New("MQTT_DEFAULT_CONNECTION environment variable is required")
+	}
+
+	// Find all broker configurations
+	for _, env := range os.Environ() {
+		if strings.HasPrefix(env, "MQTT_") && !strings.HasPrefix(env, "MQTT_DEFAULT_") && !strings.HasPrefix(env, "MQTT_TLS_") && !strings.HasPrefix(env, "MQTT_AUTH_") {
+			parts := strings.SplitN(env, "=", 2)
+			if len(parts) != 2 {
+				continue
+			}
+
+			key := parts[0]
+			keyParts := strings.Split(key, "_")
+			if len(keyParts) < 3 {
+				continue
+			}
+
+			brokerName := strings.ToLower(keyParts[1])
+			configKey := strings.ToUpper(strings.Join(keyParts[2:], "_"))
+
+			// Initialize broker config if it doesn't exist
+			if _, exists := config.Brokers[brokerName]; !exists {
+				config.Brokers[brokerName] = &BrokerConfig{
+					Name: brokerName,
+				}
+			}
+
+			// Set broker config values
+			broker := config.Brokers[brokerName]
+			switch configKey {
+			case "HOST":
+				broker.Host = os.Getenv(key)
+			case "PORT":
+				port, err := strconv.Atoi(os.Getenv(key))
+				if err == nil {
+					broker.Port = port
+				}
+			case "CLIENT_ID":
+				broker.ClientID = os.Getenv(key)
+			case "CLEAN_SESSION":
+				broker.CleanSession = os.Getenv(key) == "true"
+			case "ENABLE_LOGGING":
+				broker.EnableLogging = os.Getenv(key) == "true"
+			case "LOG_CHANNEL":
+				broker.LogChannel = os.Getenv(key)
+			}
+		}
+	}
+
+	// Process TLS settings
+	tlsEnabled := os.Getenv("MQTT_TLS_ENABLED") == "true"
+	tlsVerifyPeer := os.Getenv("MQTT_TLS_VERIFY_PEER") == "true"
+	tlsCAFile := os.Getenv("MQTT_TLS_CA_FILE")
+
+	// Process auth settings
+	username := os.Getenv("MQTT_AUTH_USERNAME")
+	password := os.Getenv("MQTT_AUTH_PASSWORD")
+
+	// Process API key authentication settings
+	apiKeyEnabled := os.Getenv("API_KEY_ENABLED")
+	config.EnableAPIKey = apiKeyEnabled == "true"
+	fmt.Printf("API_KEY_ENABLED environment variable: %s, resulting EnableAPIKey flag: %v\n", apiKeyEnabled, config.EnableAPIKey)
+
+	apiKeys := os.Getenv("API_KEYS")
+	if apiKeys != "" {
+		config.APIKeys = strings.Split(apiKeys, ",")
+	}
+
+	// Process database settings
+	dbType := os.Getenv("DB_CONNECTION")
+	if dbType == "" {
+		dbType = "sqlite" // Default to SQLite if not specified
+	}
+	config.Database.Type = dbType
+
+	// Process MongoDB settings
+	if dbType == "mongodb" {
+		config.Database.MongoDB.URI = os.Getenv("DB_URI")
+		config.Database.MongoDB.Database = os.Getenv("DB_DATABASE")
+		config.Database.MongoDB.Username = os.Getenv("DB_USERNAME")
+		config.Database.MongoDB.Password = os.Getenv("DB_PASSWORD")
+
+		// Parse port if provided
+		portStr := os.Getenv("DB_PORT")
+		if portStr != "" {
+			port, err := strconv.Atoi(portStr)
+			if err == nil {
+				config.Database.MongoDB.Port = port
+			}
+		}
+	}
+
+	// Process SQLite settings
+	if dbType == "sqlite" {
+		config.Database.SQLite.Path = os.Getenv("DB_PATH")
+		if config.Database.SQLite.Path == "" {
+			config.Database.SQLite.Path = "mqtt-messages.db" // Default SQLite database path
+		}
+	}
+
+	// Apply TLS and auth settings to all brokers
+	for _, broker := range config.Brokers {
+		broker.TLSEnabled = tlsEnabled
+		broker.TLSVerifyPeer = tlsVerifyPeer
+		broker.TLSCAFile = tlsCAFile
+		broker.Username = username
+		broker.Password = password
+	}
+
+	// Validate configuration
+	if len(config.Brokers) == 0 {
+		return nil, errors.New("no MQTT broker configurations found")
+	}
+
+	// Validate default connection
+	if _, exists := config.Brokers[config.DefaultConnection]; !exists {
+		return nil, fmt.Errorf("default connection '%s' not found in broker configurations", config.DefaultConnection)
+	}
+
+	return config, nil
+}
+
+// GetBrokerConfig returns the configuration for a specific broker
+func (c *Config) GetBrokerConfig(name string) (*BrokerConfig, error) {
+	if name == "" {
+		name = c.DefaultConnection
+	}
+
+	broker, exists := c.Brokers[name]
+	if !exists {
+		return nil, fmt.Errorf("broker configuration '%s' not found", name)
+	}
+
+	return broker, nil
+}
+
+// GetDefaultBrokerConfig returns the configuration for the default broker
+func (c *Config) GetDefaultBrokerConfig() (*BrokerConfig, error) {
+	return c.GetBrokerConfig(c.DefaultConnection)
+}
+
+// Validate checks if the broker configuration is valid
+func (b *BrokerConfig) Validate() error {
+	if b.Host == "" {
+		return fmt.Errorf("host is required for broker '%s'", b.Name)
+	}
+	if b.Port == 0 {
+		return fmt.Errorf("port is required for broker '%s'", b.Name)
+	}
+	if b.ClientID == "" {
+		return fmt.Errorf("client ID is required for broker '%s'", b.Name)
+	}
+	if b.TLSEnabled && b.TLSCAFile != "" {
+		// Check if the CA file exists
+		if _, err := os.Stat(b.TLSCAFile); os.IsNotExist(err) {
+			return fmt.Errorf("TLS CA file '%s' does not exist for broker '%s'", b.TLSCAFile, b.Name)
+		}
+	}
+	return nil
+}
