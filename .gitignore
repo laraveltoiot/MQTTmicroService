@@ -38,3 +38,4 @@ certificates/*
 
 # Logs
 *.log
+mqtt-messages.db

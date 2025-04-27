@@ -25,11 +25,23 @@ The microservice is built with a clean, modular architecture:
 
 ## API Endpoints
 
+### Core MQTT Endpoints
 - `POST /publish`: Publish a message to a topic
 - `POST /subscribe`: Subscribe to a topic
 - `POST /unsubscribe`: Unsubscribe from a topic
 - `GET /status`: Get the status of all MQTT connections
 - `GET /healthz`: Health check endpoint
+
+### Monitoring Endpoints
+- `GET /metrics`: Get metrics about the MQTT microservice
+- `GET /logs`: View logs
+
+### Database Endpoints
+- `GET /messages`: Get messages from the database
+- `GET /messages/{id}`: Get a specific message by ID
+- `POST /messages/{id}/confirm`: Confirm a message
+- `DELETE /messages/{id}`: Delete a specific message
+- `DELETE /messages/confirmed`: Delete all confirmed messages
 
 ## Environment Variables
 
@@ -109,3 +121,226 @@ For production deployment, consider the following:
 4. Store SSL certificates securely and ensure they are regularly updated.
 
 ## API Usage Examples
+
+### Publish a Message
+
+**Endpoint**: `POST /publish`
+
+**Request**:
+```json
+{
+  "topic": "sensors/temperature",
+  "payload": {"value": 23.5, "unit": "celsius"},
+  "qos": 1,
+  "retained": false,
+  "broker": "hivemq"
+}
+```
+
+**Response**:
+```json
+{
+  "status": "success",
+  "message": "Message published successfully"
+}
+```
+
+### Subscribe to a Topic
+
+**Endpoint**: `POST /subscribe`
+
+**Request**:
+```json
+{
+  "topic": "sensors/temperature",
+  "qos": 1,
+  "broker": "hivemq"
+}
+```
+
+**Response**:
+```json
+{
+  "status": "success",
+  "message": "Subscribed to topic sensors/temperature"
+}
+```
+
+### Unsubscribe from a Topic
+
+**Endpoint**: `POST /unsubscribe`
+
+**Request**:
+```json
+{
+  "topic": "sensors/temperature",
+  "broker": "hivemq"
+}
+```
+
+**Response**:
+```json
+{
+  "status": "success",
+  "message": "Unsubscribed from topic sensors/temperature"
+}
+```
+
+### Check Status
+
+**Endpoint**: `GET /status`
+
+**Response**:
+```json
+{
+  "status": "ok",
+  "brokers": {
+    "hivemq": {
+      "connected": true,
+      "subscriptions": ["sensors/temperature", "sensors/humidity"]
+    },
+    "mosquitto": {
+      "connected": false,
+      "subscriptions": []
+    }
+  },
+  "timestamp": "2023-04-27T16:43:42Z"
+}
+```
+
+### Health Check
+
+**Endpoint**: `GET /healthz`
+
+**Response**:
+```json
+{
+  "status": "ok"
+}
+```
+
+### Get Metrics
+
+**Endpoint**: `GET /metrics`
+
+**Response**:
+```json
+{
+  "messages": {
+    "published": 42,
+    "received": 18,
+    "failed": 2
+  },
+  "subscriptions": 5,
+  "connections": {
+    "attempts": 7,
+    "failures": 1,
+    "successes": 6,
+    "disconnections": 2
+  },
+  "api": {
+    "requests": 156,
+    "errors": 3
+  },
+  "latency": {
+    "publish": "15.2ms",
+    "subscribe": "22.7ms"
+  },
+  "last_updated": "2023-04-27T16:43:42Z"
+}
+```
+
+### View Logs
+
+**Endpoint**: `GET /logs`
+
+**Response**: Plain text log output
+
+### Get Messages from Database
+
+**Endpoint**: `GET /messages?confirmed=false&limit=10`
+
+**Response**:
+```json
+{
+  "status": "success",
+  "messages": [
+    {
+      "id": "1682619845123456789",
+      "topic": "sensors/temperature",
+      "payload": {"value": 23.5, "unit": "celsius"},
+      "qos": 1,
+      "retained": false,
+      "timestamp": "2023-04-27T16:43:42Z",
+      "confirmed": false
+    },
+    {
+      "id": "1682619845987654321",
+      "topic": "sensors/humidity",
+      "payload": {"value": 45.2, "unit": "percent"},
+      "qos": 1,
+      "retained": false,
+      "timestamp": "2023-04-27T16:43:42Z",
+      "confirmed": false
+    }
+  ],
+  "count": 2
+}
+```
+
+### Get Message by ID
+
+**Endpoint**: `GET /messages/{id}`
+
+**Response**:
+```json
+{
+  "status": "success",
+  "message": {
+    "id": "1682619845123456789",
+    "topic": "sensors/temperature",
+    "payload": {"value": 23.5, "unit": "celsius"},
+    "qos": 1,
+    "retained": false,
+    "timestamp": "2023-04-27T16:43:42Z",
+    "confirmed": false
+  }
+}
+```
+
+### Confirm Message
+
+**Endpoint**: `POST /messages/{id}/confirm`
+
+**Response**:
+```json
+{
+  "status": "success",
+  "message": "Message 1682619845123456789 confirmed"
+}
+```
+
+### Delete Message
+
+**Endpoint**: `DELETE /messages/{id}`
+
+**Response**:
+```json
+{
+  "status": "success",
+  "message": "Message 1682619845123456789 deleted"
+}
+```
+
+### Delete Confirmed Messages
+
+**Endpoint**: `DELETE /messages/confirmed`
+
+**Response**:
+```json
+{
+  "status": "success",
+  "message": "5 confirmed messages deleted",
+  "count": 5
+}
+```
