@@ -1,4 +1,4 @@
-﻿package database
+package database
 
 import (
 	"context"
@@ -8,6 +8,9 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"MQTTmicroService/internal/models"
+	"MQTTmicroService/internal/utils"
 
 	_ "modernc.org/sqlite"
 )
@@ -83,6 +86,46 @@ func (s *SQLiteDatabase) Connect(ctx context.Context) error {
 	// Create an index on the confirmed column
 	_, err = db.ExecContext(ctx, `
 		CREATE INDEX IF NOT EXISTS idx_messages_confirmed ON messages(confirmed)
+	`)
+	if err != nil {
+		db.Close()
+		return fmt.Errorf("failed to create index: %w", err)
+	}
+
+	// Create the webhooks table if it doesn't exist
+	_, err = db.ExecContext(ctx, `
+		CREATE TABLE IF NOT EXISTS webhooks (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			url TEXT NOT NULL,
+			method TEXT NOT NULL,
+			topic_filter TEXT NOT NULL,
+			enabled INTEGER NOT NULL,
+			headers TEXT,
+			timeout INTEGER NOT NULL,
+			retry_count INTEGER NOT NULL,
+			retry_delay INTEGER NOT NULL,
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL
+		)
+	`)
+	if err != nil {
+		db.Close()
+		return fmt.Errorf("failed to create webhooks table: %w", err)
+	}
+
+	// Create an index on the topic_filter column
+	_, err = db.ExecContext(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_webhooks_topic_filter ON webhooks(topic_filter)
+	`)
+	if err != nil {
+		db.Close()
+		return fmt.Errorf("failed to create index: %w", err)
+	}
+
+	// Create an index on the enabled column
+	_, err = db.ExecContext(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_webhooks_enabled ON webhooks(enabled)
 	`)
 	if err != nil {
 		db.Close()
@@ -344,4 +387,292 @@ func boolToInt(b bool) int {
 // intToBool converts an integer to a boolean (0 = false, non-0 = true)
 func intToBool(i int) bool {
 	return i != 0
+}
+
+// StoreWebhook stores a webhook in the database
+func (s *SQLiteDatabase) StoreWebhook(ctx context.Context, webhook *models.Webhook) error {
+	if s.db == nil {
+		return ErrConnectionFailed
+	}
+
+	// Generate an ID if one is not provided
+	if webhook.ID == "" {
+		webhook.ID = fmt.Sprintf("%d", time.Now().UnixNano())
+	}
+
+	// Set timestamps if not already set
+	if webhook.CreatedAt.IsZero() {
+		webhook.CreatedAt = time.Now()
+	}
+	if webhook.UpdatedAt.IsZero() {
+		webhook.UpdatedAt = time.Now()
+	}
+
+	// Convert headers to JSON
+	headersJSON, err := json.Marshal(webhook.Headers)
+	if err != nil {
+		return fmt.Errorf("failed to marshal headers to JSON: %w", err)
+	}
+
+	// Insert the webhook
+	_, err = s.db.ExecContext(ctx,
+		`INSERT INTO webhooks (id, name, url, method, topic_filter, enabled, headers, timeout, retry_count, retry_delay, created_at, updated_at) 
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		webhook.ID, webhook.Name, webhook.URL, webhook.Method, webhook.TopicFilter, boolToInt(webhook.Enabled),
+		headersJSON, webhook.Timeout, webhook.RetryCount, webhook.RetryDelay, webhook.CreatedAt, webhook.UpdatedAt)
+	if err != nil {
+		return fmt.Errorf("failed to insert webhook: %w", err)
+	}
+
+	return nil
+}
+
+// GetWebhooks retrieves webhooks from the database
+func (s *SQLiteDatabase) GetWebhooks(ctx context.Context, limit int) ([]*models.Webhook, error) {
+	if s.db == nil {
+		return nil, ErrConnectionFailed
+	}
+
+	// Default limit if not specified
+	if limit <= 0 {
+		limit = 100
+	}
+
+	// Query the database
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, name, url, method, topic_filter, enabled, headers, timeout, retry_count, retry_delay, created_at, updated_at 
+		 FROM webhooks 
+		 ORDER BY created_at DESC 
+		 LIMIT ?`,
+		limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query webhooks: %w", err)
+	}
+	defer rows.Close()
+
+	// Parse the results
+	var webhooks []*models.Webhook
+	for rows.Next() {
+		var webhook models.Webhook
+		var enabled int
+		var headersJSON []byte
+		var createdAt, updatedAt string
+
+		if err := rows.Scan(&webhook.ID, &webhook.Name, &webhook.URL, &webhook.Method, &webhook.TopicFilter, &enabled,
+			&headersJSON, &webhook.Timeout, &webhook.RetryCount, &webhook.RetryDelay, &createdAt, &updatedAt); err != nil {
+			return nil, fmt.Errorf("failed to scan webhook: %w", err)
+		}
+
+		// Parse timestamps
+		webhook.CreatedAt, err = time.Parse("2006-01-02 15:04:05", createdAt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse created_at timestamp: %w", err)
+		}
+		webhook.UpdatedAt, err = time.Parse("2006-01-02 15:04:05", updatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse updated_at timestamp: %w", err)
+		}
+
+		// Set the boolean fields
+		webhook.Enabled = intToBool(enabled)
+
+		// Parse headers
+		webhook.Headers = make(map[string]string)
+		if len(headersJSON) > 0 {
+			if err := json.Unmarshal(headersJSON, &webhook.Headers); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal headers: %w", err)
+			}
+		}
+
+		webhooks = append(webhooks, &webhook)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating webhooks: %w", err)
+	}
+
+	return webhooks, nil
+}
+
+// GetWebhookByID retrieves a webhook by its ID
+func (s *SQLiteDatabase) GetWebhookByID(ctx context.Context, id string) (*models.Webhook, error) {
+	if s.db == nil {
+		return nil, ErrConnectionFailed
+	}
+
+	// Query the database
+	row := s.db.QueryRowContext(ctx,
+		`SELECT id, name, url, method, topic_filter, enabled, headers, timeout, retry_count, retry_delay, created_at, updated_at 
+		 FROM webhooks 
+		 WHERE id = ?`,
+		id)
+
+	// Parse the result
+	var webhook models.Webhook
+	var enabled int
+	var headersJSON []byte
+	var createdAt, updatedAt string
+
+	if err := row.Scan(&webhook.ID, &webhook.Name, &webhook.URL, &webhook.Method, &webhook.TopicFilter, &enabled,
+		&headersJSON, &webhook.Timeout, &webhook.RetryCount, &webhook.RetryDelay, &createdAt, &updatedAt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, ErrMessageNotFound
+		}
+		return nil, fmt.Errorf("failed to scan webhook: %w", err)
+	}
+
+	// Parse timestamps
+	var err error
+	webhook.CreatedAt, err = time.Parse("2006-01-02 15:04:05", createdAt)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse created_at timestamp: %w", err)
+	}
+	webhook.UpdatedAt, err = time.Parse("2006-01-02 15:04:05", updatedAt)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse updated_at timestamp: %w", err)
+	}
+
+	// Set the boolean fields
+	webhook.Enabled = intToBool(enabled)
+
+	// Parse headers
+	webhook.Headers = make(map[string]string)
+	if len(headersJSON) > 0 {
+		if err := json.Unmarshal(headersJSON, &webhook.Headers); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal headers: %w", err)
+		}
+	}
+
+	return &webhook, nil
+}
+
+// UpdateWebhook updates a webhook in the database
+func (s *SQLiteDatabase) UpdateWebhook(ctx context.Context, webhook *models.Webhook) error {
+	if s.db == nil {
+		return ErrConnectionFailed
+	}
+
+	// Update the timestamp
+	webhook.UpdatedAt = time.Now()
+
+	// Convert headers to JSON
+	headersJSON, err := json.Marshal(webhook.Headers)
+	if err != nil {
+		return fmt.Errorf("failed to marshal headers to JSON: %w", err)
+	}
+
+	// Update the webhook
+	result, err := s.db.ExecContext(ctx,
+		`UPDATE webhooks 
+		 SET name = ?, url = ?, method = ?, topic_filter = ?, enabled = ?, headers = ?, 
+		     timeout = ?, retry_count = ?, retry_delay = ?, updated_at = ? 
+		 WHERE id = ?`,
+		webhook.Name, webhook.URL, webhook.Method, webhook.TopicFilter, boolToInt(webhook.Enabled),
+		headersJSON, webhook.Timeout, webhook.RetryCount, webhook.RetryDelay, webhook.UpdatedAt, webhook.ID)
+	if err != nil {
+		return fmt.Errorf("failed to update webhook: %w", err)
+	}
+
+	// Check if the webhook was found
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+	if rowsAffected == 0 {
+		return ErrMessageNotFound
+	}
+
+	return nil
+}
+
+// DeleteWebhook deletes a webhook from the database
+func (s *SQLiteDatabase) DeleteWebhook(ctx context.Context, id string) error {
+	if s.db == nil {
+		return ErrConnectionFailed
+	}
+
+	// Delete the webhook
+	result, err := s.db.ExecContext(ctx,
+		`DELETE FROM webhooks WHERE id = ?`,
+		id)
+	if err != nil {
+		return fmt.Errorf("failed to delete webhook: %w", err)
+	}
+
+	// Check if the webhook was found
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+	if rowsAffected == 0 {
+		return ErrMessageNotFound
+	}
+
+	return nil
+}
+
+// GetWebhooksByTopicFilter retrieves webhooks that match a topic
+func (s *SQLiteDatabase) GetWebhooksByTopicFilter(ctx context.Context, topic string) ([]*models.Webhook, error) {
+	if s.db == nil {
+		return nil, ErrConnectionFailed
+	}
+
+	// Get all enabled webhooks
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, name, url, method, topic_filter, enabled, headers, timeout, retry_count, retry_delay, created_at, updated_at 
+		 FROM webhooks 
+		 WHERE enabled = 1
+		 ORDER BY created_at DESC`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query webhooks: %w", err)
+	}
+	defer rows.Close()
+
+	// Parse the results and filter by topic
+	var webhooks []*models.Webhook
+	for rows.Next() {
+		var webhook models.Webhook
+		var enabled int
+		var headersJSON []byte
+		var createdAt, updatedAt string
+
+		if err := rows.Scan(&webhook.ID, &webhook.Name, &webhook.URL, &webhook.Method, &webhook.TopicFilter, &enabled,
+			&headersJSON, &webhook.Timeout, &webhook.RetryCount, &webhook.RetryDelay, &createdAt, &updatedAt); err != nil {
+			return nil, fmt.Errorf("failed to scan webhook: %w", err)
+		}
+
+		// Check if the topic matches the filter
+		if !utils.TopicMatchesFilter(topic, webhook.TopicFilter) {
+			continue
+		}
+
+		// Parse timestamps
+		webhook.CreatedAt, err = time.Parse("2006-01-02 15:04:05", createdAt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse created_at timestamp: %w", err)
+		}
+		webhook.UpdatedAt, err = time.Parse("2006-01-02 15:04:05", updatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse updated_at timestamp: %w", err)
+		}
+
+		// Set the boolean fields
+		webhook.Enabled = intToBool(enabled)
+
+		// Parse headers
+		webhook.Headers = make(map[string]string)
+		if len(headersJSON) > 0 {
+			if err := json.Unmarshal(headersJSON, &webhook.Headers); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal headers: %w", err)
+			}
+		}
+
+		webhooks = append(webhooks, &webhook)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating webhooks: %w", err)
+	}
+
+	return webhooks, nil
 }

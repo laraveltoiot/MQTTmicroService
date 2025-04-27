@@ -1,8 +1,10 @@
-﻿package database
+package database
 
 import (
 	"context"
 	"time"
+
+	"MQTTmicroService/internal/models"
 )
 
 // Message represents a message stored in the database
@@ -41,6 +43,14 @@ type Database interface {
 
 	// DeleteConfirmedMessages deletes all confirmed messages
 	DeleteConfirmedMessages(ctx context.Context) (int, error)
+
+	// Webhook operations
+	StoreWebhook(ctx context.Context, webhook *models.Webhook) error
+	GetWebhooks(ctx context.Context, limit int) ([]*models.Webhook, error)
+	GetWebhookByID(ctx context.Context, id string) (*models.Webhook, error)
+	UpdateWebhook(ctx context.Context, webhook *models.Webhook) error
+	DeleteWebhook(ctx context.Context, id string) error
+	GetWebhooksByTopicFilter(ctx context.Context, topic string) ([]*models.Webhook, error)
 
 	// Ping checks if the database is reachable
 	Ping(ctx context.Context) error

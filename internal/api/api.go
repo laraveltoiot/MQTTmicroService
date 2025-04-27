@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"MQTTmicroService/internal/auth"
+	"MQTTmicroService/internal/config"
 	"MQTTmicroService/internal/database"
 	"MQTTmicroService/internal/logger"
 	"MQTTmicroService/internal/metrics"
@@ -28,6 +30,7 @@ type Server struct {
 	auth        *auth.Auth
 	db          database.Database
 	server      *http.Server
+	config      *config.Config
 }
 
 // PublishRequest represents a request to publish a message
@@ -59,8 +62,17 @@ type BrokerStatus struct {
 	Subscriptions []string `json:"subscriptions"`
 }
 
+// WebhookPayload represents the payload sent to the webhook
+type WebhookPayload struct {
+	Topic     string      `json:"topic"`
+	Payload   interface{} `json:"payload"`
+	QoS       byte        `json:"qos"`
+	Timestamp string      `json:"timestamp"`
+	Broker    string      `json:"broker"`
+}
+
 // NewServer creates a new HTTP API server
-func NewServer(mqttManager *mqtt.Manager, log *logger.Logger, metricsCollector *metrics.Metrics, authService *auth.Auth, db database.Database, addr string) *Server {
+func NewServer(mqttManager *mqtt.Manager, log *logger.Logger, metricsCollector *metrics.Metrics, authService *auth.Auth, db database.Database, cfg *config.Config, addr string) *Server {
 	router := mux.NewRouter()
 
 	server := &Server{
@@ -70,6 +82,7 @@ func NewServer(mqttManager *mqtt.Manager, log *logger.Logger, metricsCollector *
 		metrics:     metricsCollector,
 		auth:        authService,
 		db:          db,
+		config:      cfg,
 		server: &http.Server{
 			Addr:         addr,
 			Handler:      router,
@@ -109,11 +122,19 @@ func (s *Server) setupRoutes() {
 
 	// Database-related endpoints
 	if s.db != nil {
+		// Message endpoints
 		s.router.HandleFunc("/messages", s.handleGetMessages).Methods("GET")
 		s.router.HandleFunc("/messages/{id}", s.handleGetMessage).Methods("GET")
 		s.router.HandleFunc("/messages/{id}/confirm", s.handleConfirmMessage).Methods("POST")
 		s.router.HandleFunc("/messages/{id}", s.handleDeleteMessage).Methods("DELETE")
 		s.router.HandleFunc("/messages/confirmed", s.handleDeleteConfirmedMessages).Methods("DELETE")
+
+		// Webhook endpoints
+		s.router.HandleFunc("/webhooks", s.handleGetWebhooks).Methods("GET")
+		s.router.HandleFunc("/webhooks", s.handleCreateWebhook).Methods("POST")
+		s.router.HandleFunc("/webhooks/{id}", s.handleGetWebhook).Methods("GET")
+		s.router.HandleFunc("/webhooks/{id}", s.handleUpdateWebhook).Methods("PUT")
+		s.router.HandleFunc("/webhooks/{id}", s.handleDeleteWebhook).Methods("DELETE")
 	}
 }
 
@@ -242,7 +263,7 @@ func (s *Server) handleSubscribe(w http.ResponseWriter, r *http.Request) {
 	// Start timing for latency measurement
 	startTime := time.Now()
 
-	// Create a message handler that logs received messages and updates metrics
+	// Create a message handler that logs received messages, updates metrics, and sends webhook notifications
 	messageHandler := func(client pahomqtt.Client, msg pahomqtt.Message) {
 		s.logger.WithFields(map[string]interface{}{
 			"topic":   msg.Topic(),
@@ -254,6 +275,16 @@ func (s *Server) handleSubscribe(w http.ResponseWriter, r *http.Request) {
 		if s.metrics != nil {
 			s.metrics.IncrementReceivedMessages()
 		}
+
+		// Try to parse the payload as JSON
+		var payloadData interface{} = string(msg.Payload())
+		var jsonPayload interface{}
+		if err := json.Unmarshal(msg.Payload(), &jsonPayload); err == nil {
+			payloadData = jsonPayload
+		}
+
+		// Send webhook notification
+		go s.sendWebhookNotification(msg.Topic(), req.Broker, payloadData, msg.Qos())
 	}
 
 	if err := client.Subscribe(req.Topic, req.QoS, pahomqtt.MessageHandler(messageHandler)); err != nil {
@@ -446,4 +477,88 @@ func (s *Server) writeError(w http.ResponseWriter, status int, message string) {
 		"status":  "error",
 		"message": message,
 	})
+}
+
+// sendWebhookNotification sends a notification to the configured webhook URL
+func (s *Server) sendWebhookNotification(topic, broker string, payload interface{}, qos byte) {
+	// Check if webhook notifications are enabled
+	if s.config == nil || s.config.Webhook == nil || !s.config.Webhook.Enabled || s.config.Webhook.URL == "" {
+		return
+	}
+
+	// Create webhook payload
+	webhookPayload := WebhookPayload{
+		Topic:     topic,
+		Payload:   payload,
+		QoS:       qos,
+		Timestamp: time.Now().Format(time.RFC3339),
+		Broker:    broker,
+	}
+
+	// Convert payload to JSON
+	jsonPayload, err := json.Marshal(webhookPayload)
+	if err != nil {
+		s.logger.WithError(err).Error("Failed to marshal webhook payload")
+		return
+	}
+
+	// Create HTTP request
+	req, err := http.NewRequest(s.config.Webhook.Method, s.config.Webhook.URL, bytes.NewBuffer(jsonPayload))
+	if err != nil {
+		s.logger.WithError(err).Error("Failed to create webhook request")
+		return
+	}
+
+	// Set headers
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "MQTT-Microservice")
+
+	// Create HTTP client with timeout
+	client := &http.Client{
+		Timeout: time.Duration(s.config.Webhook.Timeout) * time.Second,
+	}
+
+	// Send request with retry logic
+	var resp *http.Response
+	var lastErr error
+	for i := 0; i <= s.config.Webhook.RetryCount; i++ {
+		if i > 0 {
+			s.logger.WithFields(map[string]interface{}{
+				"attempt": i,
+				"error":   lastErr,
+			}).Warn("Retrying webhook notification")
+			time.Sleep(time.Duration(s.config.Webhook.RetryDelay) * time.Second)
+		}
+
+		resp, err = client.Do(req)
+		if err == nil && resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			// Success
+			resp.Body.Close()
+			s.logger.WithFields(map[string]interface{}{
+				"topic":  topic,
+				"broker": broker,
+				"url":    s.config.Webhook.URL,
+			}).Info("Webhook notification sent successfully")
+			return
+		}
+
+		if err != nil {
+			lastErr = err
+			s.logger.WithError(err).Error("Failed to send webhook notification")
+		} else {
+			lastErr = fmt.Errorf("webhook returned status code %d", resp.StatusCode)
+			resp.Body.Close()
+			s.logger.WithFields(map[string]interface{}{
+				"status": resp.StatusCode,
+				"url":    s.config.Webhook.URL,
+			}).Error("Webhook notification failed")
+		}
+	}
+
+	s.logger.WithFields(map[string]interface{}{
+		"topic":       topic,
+		"broker":      broker,
+		"url":         s.config.Webhook.URL,
+		"retry_count": s.config.Webhook.RetryCount,
+	}).Error("Webhook notification failed after retries")
 }

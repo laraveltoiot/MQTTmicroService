@@ -16,12 +16,17 @@ This guide explains how to use the microservice, including its API endpoints, lo
   - [Check Status](#check-status)
   - [Health Check](#health-check)
   - [Database Operations](#database-operations)
+- [Webhook Notifications](#webhook-notifications)
+  - [Configuration](#webhook-configuration)
+  - [Payload Format](#webhook-payload-format)
+  - [Laravel Integration](#laravel-integration)
 - [Logging System](#logging-system)
 - [Telemetry and Metrics](#telemetry-and-metrics)
 - [Configuration](#configuration)
   - [Environment Variables](#environment-variables)
   - [SSL/TLS Configuration](#ssltls-configuration)
   - [Database Configuration](#database-configuration)
+  - [Webhook Configuration](#webhook-configuration-1)
 - [Authentication](#authentication)
 - [Testing](#testing)
 - [Troubleshooting](#troubleshooting)
@@ -33,6 +38,7 @@ The microservice is built with a clean, modular architecture:
 - **Configuration Module**: Loads and validates connection settings from environment variables
 - **MQTT Client Manager**: Manages connections to multiple MQTT brokers
 - **HTTP API Server**: Exposes endpoints for publishing messages, managing subscriptions, and checking status
+- **Webhook Notifier**: Sends HTTP notifications to Laravel when messages are received on subscribed topics
 - **Logging Utility**: Provides consistent logging throughout the application
 - **Metrics Collector**: Tracks performance and usage metrics
 - **Authentication Module**: Secures API endpoints with API key authentication
@@ -224,6 +230,235 @@ Simple health check endpoint that returns a 200 OK response if the service is ru
 curl -X GET http://localhost:8080/healthz
 ```
 
+### Webhook Management
+
+The microservice provides endpoints for managing webhooks. Webhooks allow you to configure HTTP callbacks that are triggered when messages are received on specific MQTT topics.
+
+#### Get All Webhooks
+
+**Endpoint**: `GET /webhooks`
+
+Retrieves all configured webhooks.
+
+**Query Parameters**:
+- `limit` (optional): Maximum number of webhooks to return, default is 100
+
+**Response**:
+```json
+{
+  "status": "success",
+  "webhooks": [
+    {
+      "id": "1682619845123456789",
+      "name": "Temperature Webhook",
+      "url": "https://your-laravel-app.com/api/temperature",
+      "method": "POST",
+      "topic_filter": "sensors/temperature",
+      "enabled": true,
+      "headers": {
+        "X-API-Key": "your-api-key"
+      },
+      "timeout": 10,
+      "retry_count": 3,
+      "retry_delay": 5,
+      "created_at": "2023-04-27T16:43:42Z",
+      "updated_at": "2023-04-27T16:43:42Z"
+    }
+  ],
+  "count": 1
+}
+```
+
+**Example (using curl)**:
+```bash
+curl -X GET "http://localhost:8080/webhooks?limit=10"
+```
+
+#### Get Webhook by ID
+
+**Endpoint**: `GET /webhooks/{id}`
+
+Retrieves a specific webhook by its ID.
+
+**Response**:
+```json
+{
+  "status": "success",
+  "webhook": {
+    "id": "1682619845123456789",
+    "name": "Temperature Webhook",
+    "url": "https://your-laravel-app.com/api/temperature",
+    "method": "POST",
+    "topic_filter": "sensors/temperature",
+    "enabled": true,
+    "headers": {
+      "X-API-Key": "your-api-key"
+    },
+    "timeout": 10,
+    "retry_count": 3,
+    "retry_delay": 5,
+    "created_at": "2023-04-27T16:43:42Z",
+    "updated_at": "2023-04-27T16:43:42Z"
+  }
+}
+```
+
+**Example (using curl)**:
+```bash
+curl -X GET http://localhost:8080/webhooks/1682619845123456789
+```
+
+#### Create Webhook
+
+**Endpoint**: `POST /webhooks`
+
+Creates a new webhook.
+
+**Request Body**:
+```json
+{
+  "name": "Temperature Webhook",
+  "url": "https://your-laravel-app.com/api/temperature",
+  "method": "POST",
+  "topic_filter": "sensors/temperature",
+  "enabled": true,
+  "headers": {
+    "X-API-Key": "your-api-key"
+  },
+  "timeout": 10,
+  "retry_count": 3,
+  "retry_delay": 5
+}
+```
+
+**Response**:
+```json
+{
+  "status": "success",
+  "message": "Webhook created successfully",
+  "webhook": {
+    "id": "1682619845123456789",
+    "name": "Temperature Webhook",
+    "url": "https://your-laravel-app.com/api/temperature",
+    "method": "POST",
+    "topic_filter": "sensors/temperature",
+    "enabled": true,
+    "headers": {
+      "X-API-Key": "your-api-key"
+    },
+    "timeout": 10,
+    "retry_count": 3,
+    "retry_delay": 5,
+    "created_at": "2023-04-27T16:43:42Z",
+    "updated_at": "2023-04-27T16:43:42Z"
+  }
+}
+```
+
+**Example (using curl)**:
+```bash
+curl -X POST http://localhost:8080/webhooks \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Temperature Webhook",
+    "url": "https://your-laravel-app.com/api/temperature",
+    "method": "POST",
+    "topic_filter": "sensors/temperature",
+    "enabled": true,
+    "headers": {
+      "X-API-Key": "your-api-key"
+    },
+    "timeout": 10,
+    "retry_count": 3,
+    "retry_delay": 5
+  }'
+```
+
+#### Update Webhook
+
+**Endpoint**: `PUT /webhooks/{id}`
+
+Updates an existing webhook.
+
+**Request Body**:
+```json
+{
+  "name": "Updated Temperature Webhook",
+  "url": "https://your-laravel-app.com/api/temperature/v2",
+  "method": "POST",
+  "topic_filter": "sensors/+/temperature",
+  "enabled": true,
+  "headers": {
+    "X-API-Key": "your-new-api-key"
+  },
+  "timeout": 15,
+  "retry_count": 5,
+  "retry_delay": 10
+}
+```
+
+**Response**:
+```json
+{
+  "status": "success",
+  "message": "Webhook updated successfully",
+  "webhook": {
+    "id": "1682619845123456789",
+    "name": "Updated Temperature Webhook",
+    "url": "https://your-laravel-app.com/api/temperature/v2",
+    "method": "POST",
+    "topic_filter": "sensors/+/temperature",
+    "enabled": true,
+    "headers": {
+      "X-API-Key": "your-new-api-key"
+    },
+    "timeout": 15,
+    "retry_count": 5,
+    "retry_delay": 10,
+    "created_at": "2023-04-27T16:43:42Z",
+    "updated_at": "2023-04-27T16:45:00Z"
+  }
+}
+```
+
+**Example (using curl)**:
+```bash
+curl -X PUT http://localhost:8080/webhooks/1682619845123456789 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Updated Temperature Webhook",
+    "url": "https://your-laravel-app.com/api/temperature/v2",
+    "method": "POST",
+    "topic_filter": "sensors/+/temperature",
+    "enabled": true,
+    "headers": {
+      "X-API-Key": "your-new-api-key"
+    },
+    "timeout": 15,
+    "retry_count": 5,
+    "retry_delay": 10
+  }'
+```
+
+#### Delete Webhook
+
+**Endpoint**: `DELETE /webhooks/{id}`
+
+Deletes a webhook.
+
+**Response**:
+```json
+{
+  "status": "success",
+  "message": "Webhook 1682619845123456789 deleted successfully"
+}
+```
+
+**Example (using curl)**:
+```bash
+curl -X DELETE http://localhost:8080/webhooks/1682619845123456789
+```
+
 ### Database Operations
 
 The microservice includes a database integration that stores MQTT messages and allows Laravel to confirm receipt of messages. This ensures that messages are not lost if Laravel is temporarily unavailable.
@@ -354,6 +589,84 @@ Deletes all confirmed messages from the database.
 **Example (using curl)**:
 ```bash
 curl -X DELETE http://localhost:8080/messages/confirmed
+```
+
+## Webhook Notifications
+
+The microservice can send webhook notifications to your Laravel application when messages are received on subscribed topics. This allows your Laravel application to react to MQTT messages without having to poll the microservice.
+
+### Webhook Configuration
+
+Webhook notifications are configured using environment variables:
+
+```
+WEBHOOK_ENABLED=true
+WEBHOOK_URL=https://your-laravel-app.com/api/mqtt/webhook
+WEBHOOK_METHOD=POST
+WEBHOOK_TIMEOUT=10
+WEBHOOK_RETRY_COUNT=3
+WEBHOOK_RETRY_DELAY=5
+```
+
+- `WEBHOOK_ENABLED`: Set to `true` to enable webhook notifications
+- `WEBHOOK_URL`: The URL to send webhook notifications to
+- `WEBHOOK_METHOD`: The HTTP method to use (default: `POST`)
+- `WEBHOOK_TIMEOUT`: The timeout for webhook requests in seconds (default: `10`)
+- `WEBHOOK_RETRY_COUNT`: The number of times to retry failed webhook requests (default: `3`)
+- `WEBHOOK_RETRY_DELAY`: The delay between retries in seconds (default: `5`)
+
+### Webhook Payload Format
+
+When a message is received on a subscribed topic, the microservice sends a webhook notification to the configured URL with the following payload:
+
+```json
+{
+  "topic": "sensors/temperature",
+  "payload": {"value": 23.5, "unit": "celsius"},
+  "qos": 1,
+  "timestamp": "2023-04-27T16:43:42Z",
+  "broker": "hivemq"
+}
+```
+
+- `topic`: The MQTT topic the message was received on
+- `payload`: The message payload (parsed as JSON if possible, otherwise as a string)
+- `qos`: The QoS level of the message
+- `timestamp`: The time the message was received
+- `broker`: The name of the broker the message was received from
+
+### Laravel Integration
+
+To integrate with Laravel, create a route and controller to handle the webhook notifications:
+
+```php
+// routes/api.php
+Route::post('/mqtt/webhook', 'MqttWebhookController@handle');
+```
+
+```php
+// app/Http/Controllers/MqttWebhookController.php
+namespace App\Http\Controllers;
+
+use Illuminate\Http\Request;
+
+class MqttWebhookController extends Controller
+{
+    public function handle(Request $request)
+    {
+        $topic = $request->input('topic');
+        $payload = $request->input('payload');
+        $qos = $request->input('qos');
+        $timestamp = $request->input('timestamp');
+        $broker = $request->input('broker');
+
+        // Process the message
+        // For example, dispatch an event
+        event(new MqttMessageReceived($topic, $payload, $qos, $timestamp, $broker));
+
+        return response()->json(['status' => 'success']);
+    }
+}
 ```
 
 ### Metrics
@@ -666,6 +979,31 @@ If both `DB_URI` and individual parameters are specified, the URI takes preceden
 
 This ensures that messages are not lost if Laravel is temporarily unavailable, as they will remain in the database until explicitly confirmed.
 
+### Webhook Configuration
+
+The microservice can send webhook notifications to your Laravel application when messages are received on subscribed topics. This allows your Laravel application to react to MQTT messages without having to poll the microservice.
+
+To configure webhook notifications, set the following environment variables:
+
+```
+# Webhook settings
+WEBHOOK_ENABLED=true
+WEBHOOK_URL=https://your-laravel-app.com/api/mqtt/webhook
+WEBHOOK_METHOD=POST
+WEBHOOK_TIMEOUT=10
+WEBHOOK_RETRY_COUNT=3
+WEBHOOK_RETRY_DELAY=5
+```
+
+- `WEBHOOK_ENABLED`: Set to `true` to enable webhook notifications
+- `WEBHOOK_URL`: The URL to send webhook notifications to
+- `WEBHOOK_METHOD`: The HTTP method to use (default: `POST`)
+- `WEBHOOK_TIMEOUT`: The timeout for webhook requests in seconds (default: `10`)
+- `WEBHOOK_RETRY_COUNT`: The number of times to retry failed webhook requests (default: `3`)
+- `WEBHOOK_RETRY_DELAY`: The delay between retries in seconds (default: `5`)
+
+When a message is received on a subscribed topic, the microservice will send a webhook notification to the configured URL with a JSON payload containing the message details. See the [Webhook Notifications](#webhook-notifications) section for more information.
+
 ## Authentication
 
 The microservice supports API key authentication to secure the API endpoints.
@@ -845,6 +1183,19 @@ curl -X GET "http://localhost:8080/messages" \
 - Check that the database is accessible
 - Verify that the message exists in the database
 - Check the logs for specific error messages
+
+**Issue: Webhook notifications not being sent**
+- Verify that webhook notifications are enabled (`WEBHOOK_ENABLED=true`)
+- Check that the webhook URL is correctly configured (`WEBHOOK_URL`)
+- Ensure the webhook URL is accessible from the microservice
+- Check the logs for webhook-related errors
+- Verify that your Laravel application is correctly handling the webhook requests
+
+**Issue: Webhook notifications failing with timeout errors**
+- Check that the webhook URL is responding within the configured timeout (`WEBHOOK_TIMEOUT`)
+- Increase the timeout value if necessary
+- Ensure your Laravel application is processing the webhook requests efficiently
+- Consider increasing the retry count (`WEBHOOK_RETRY_COUNT`) and delay (`WEBHOOK_RETRY_DELAY`) for unreliable connections
 
 ### Checking Logs
 

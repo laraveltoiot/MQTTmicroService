@@ -12,18 +12,18 @@ import (
 
 // BrokerConfig holds the configuration for a single MQTT broker
 type BrokerConfig struct {
-	Name         string
-	Host         string
-	Port         int
-	ClientID     string
-	CleanSession bool
+	Name          string
+	Host          string
+	Port          int
+	ClientID      string
+	CleanSession  bool
 	EnableLogging bool
-	LogChannel   string
-	TLSEnabled   bool
+	LogChannel    string
+	TLSEnabled    bool
 	TLSVerifyPeer bool
-	TLSCAFile    string
-	Username     string
-	Password     string
+	TLSCAFile     string
+	Username      string
+	Password      string
 }
 
 // DatabaseConfig holds the configuration for the database
@@ -46,15 +46,33 @@ type DatabaseConfig struct {
 	}
 }
 
+// WebhookConfig holds the configuration for webhook notifications
+type WebhookConfig struct {
+	// Enabled indicates whether webhook notifications are enabled
+	Enabled bool
+	// URL is the URL to send webhook notifications to
+	URL string
+	// Method is the HTTP method to use (GET, POST, etc.)
+	Method string
+	// Timeout is the timeout for webhook requests in seconds
+	Timeout int
+	// RetryCount is the number of times to retry failed webhook requests
+	RetryCount int
+	// RetryDelay is the delay between retries in seconds
+	RetryDelay int
+}
+
 // Config holds the configuration for the MQTT microservice
 type Config struct {
 	DefaultConnection string
 	Brokers           map[string]*BrokerConfig
 	// API key authentication
-	EnableAPIKey      bool
-	APIKeys           []string
+	EnableAPIKey bool
+	APIKeys      []string
 	// Database configuration
-	Database          *DatabaseConfig
+	Database *DatabaseConfig
+	// Webhook configuration
+	Webhook *WebhookConfig
 }
 
 // LoadConfig loads the configuration from environment variables
@@ -63,8 +81,9 @@ func LoadConfig() (*Config, error) {
 	_ = godotenv.Load()
 
 	config := &Config{
-		Brokers: make(map[string]*BrokerConfig),
+		Brokers:  make(map[string]*BrokerConfig),
 		Database: &DatabaseConfig{},
+		Webhook:  &WebhookConfig{},
 	}
 
 	// Get default connection
@@ -168,6 +187,51 @@ func LoadConfig() (*Config, error) {
 		if config.Database.SQLite.Path == "" {
 			config.Database.SQLite.Path = "mqtt-messages.db" // Default SQLite database path
 		}
+	}
+
+	// Process webhook settings
+	webhookEnabled := os.Getenv("WEBHOOK_ENABLED") == "true"
+	config.Webhook.Enabled = webhookEnabled
+	config.Webhook.URL = os.Getenv("WEBHOOK_URL")
+	config.Webhook.Method = os.Getenv("WEBHOOK_METHOD")
+	if config.Webhook.Method == "" {
+		config.Webhook.Method = "POST" // Default to POST if not specified
+	}
+
+	// Parse webhook timeout
+	webhookTimeoutStr := os.Getenv("WEBHOOK_TIMEOUT")
+	if webhookTimeoutStr != "" {
+		webhookTimeout, err := strconv.Atoi(webhookTimeoutStr)
+		if err == nil && webhookTimeout > 0 {
+			config.Webhook.Timeout = webhookTimeout
+		}
+	}
+	if config.Webhook.Timeout == 0 {
+		config.Webhook.Timeout = 10 // Default to 10 seconds if not specified or invalid
+	}
+
+	// Parse webhook retry count
+	webhookRetryCountStr := os.Getenv("WEBHOOK_RETRY_COUNT")
+	if webhookRetryCountStr != "" {
+		webhookRetryCount, err := strconv.Atoi(webhookRetryCountStr)
+		if err == nil && webhookRetryCount >= 0 {
+			config.Webhook.RetryCount = webhookRetryCount
+		}
+	}
+	if config.Webhook.RetryCount == 0 {
+		config.Webhook.RetryCount = 3 // Default to 3 retries if not specified or invalid
+	}
+
+	// Parse webhook retry delay
+	webhookRetryDelayStr := os.Getenv("WEBHOOK_RETRY_DELAY")
+	if webhookRetryDelayStr != "" {
+		webhookRetryDelay, err := strconv.Atoi(webhookRetryDelayStr)
+		if err == nil && webhookRetryDelay > 0 {
+			config.Webhook.RetryDelay = webhookRetryDelay
+		}
+	}
+	if config.Webhook.RetryDelay == 0 {
+		config.Webhook.RetryDelay = 5 // Default to 5 seconds if not specified or invalid
 	}
 
 	// Apply TLS and auth settings to all brokers

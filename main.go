@@ -145,7 +145,7 @@ func main() {
 	log.WithField("broker", cfg.DefaultConnection).Info("Connected to default MQTT broker")
 
 	// Initialize HTTP API server
-	apiServer := api.NewServer(mqttManager, log, metricsCollector, authService, db, *httpAddr)
+	apiServer := api.NewServer(mqttManager, log, metricsCollector, authService, db, cfg, *httpAddr)
 
 	// Start HTTP server in a goroutine
 	go func() {
