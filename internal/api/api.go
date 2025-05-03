@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -479,13 +480,8 @@ func (s *Server) writeError(w http.ResponseWriter, status int, message string) {
 	})
 }
 
-// sendWebhookNotification sends a notification to the configured webhook URL
+// sendWebhookNotification sends a notification to the configured webhook URL and any matching webhooks from the database
 func (s *Server) sendWebhookNotification(topic, broker string, payload interface{}, qos byte) {
-	// Check if webhook notifications are enabled
-	if s.config == nil || s.config.Webhook == nil || !s.config.Webhook.Enabled || s.config.Webhook.URL == "" {
-		return
-	}
-
 	// Create webhook payload
 	webhookPayload := WebhookPayload{
 		Topic:     topic,
@@ -495,6 +491,58 @@ func (s *Server) sendWebhookNotification(topic, broker string, payload interface
 		Broker:    broker,
 	}
 
+	// Send to global webhook if enabled
+	if s.config != nil && s.config.Webhook != nil && s.config.Webhook.Enabled && s.config.Webhook.URL != "" {
+		s.sendWebhookNotificationToURL(
+			webhookPayload,
+			s.config.Webhook.URL,
+			s.config.Webhook.Method,
+			nil, // No custom headers for global webhook
+			s.config.Webhook.Timeout,
+			s.config.Webhook.RetryCount,
+			s.config.Webhook.RetryDelay,
+		)
+	}
+
+	// Send to database webhooks if database is available
+	if s.db != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		// Get webhooks that match the topic
+		webhooks, err := s.db.GetWebhooksByTopicFilter(ctx, topic)
+		if err != nil {
+			s.logger.WithError(err).Error("Failed to get webhooks for topic")
+			return
+		}
+
+		// Send notification to each matching webhook
+		for _, webhook := range webhooks {
+			if webhook.Enabled {
+				s.sendWebhookNotificationToURL(
+					webhookPayload,
+					webhook.URL,
+					webhook.Method,
+					webhook.Headers,
+					webhook.Timeout,
+					webhook.RetryCount,
+					webhook.RetryDelay,
+				)
+			}
+		}
+	}
+}
+
+// sendWebhookNotificationToURL sends a notification to a specific webhook URL
+func (s *Server) sendWebhookNotificationToURL(
+	webhookPayload WebhookPayload,
+	url string,
+	method string,
+	headers map[string]string,
+	timeout int,
+	retryCount int,
+	retryDelay int,
+) {
 	// Convert payload to JSON
 	jsonPayload, err := json.Marshal(webhookPayload)
 	if err != nil {
@@ -503,7 +551,7 @@ func (s *Server) sendWebhookNotification(topic, broker string, payload interface
 	}
 
 	// Create HTTP request
-	req, err := http.NewRequest(s.config.Webhook.Method, s.config.Webhook.URL, bytes.NewBuffer(jsonPayload))
+	req, err := http.NewRequest(method, url, bytes.NewBuffer(jsonPayload))
 	if err != nil {
 		s.logger.WithError(err).Error("Failed to create webhook request")
 		return
@@ -513,21 +561,28 @@ func (s *Server) sendWebhookNotification(topic, broker string, payload interface
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "MQTT-Microservice")
 
+	// Add custom headers if provided
+	if headers != nil {
+		for key, value := range headers {
+			req.Header.Set(key, value)
+		}
+	}
+
 	// Create HTTP client with timeout
 	client := &http.Client{
-		Timeout: time.Duration(s.config.Webhook.Timeout) * time.Second,
+		Timeout: time.Duration(timeout) * time.Second,
 	}
 
 	// Send request with retry logic
 	var resp *http.Response
 	var lastErr error
-	for i := 0; i <= s.config.Webhook.RetryCount; i++ {
+	for i := 0; i <= retryCount; i++ {
 		if i > 0 {
 			s.logger.WithFields(map[string]interface{}{
 				"attempt": i,
 				"error":   lastErr,
 			}).Warn("Retrying webhook notification")
-			time.Sleep(time.Duration(s.config.Webhook.RetryDelay) * time.Second)
+			time.Sleep(time.Duration(retryDelay) * time.Second)
 		}
 
 		resp, err = client.Do(req)
@@ -535,9 +590,9 @@ func (s *Server) sendWebhookNotification(topic, broker string, payload interface
 			// Success
 			resp.Body.Close()
 			s.logger.WithFields(map[string]interface{}{
-				"topic":  topic,
-				"broker": broker,
-				"url":    s.config.Webhook.URL,
+				"topic":  webhookPayload.Topic,
+				"broker": webhookPayload.Broker,
+				"url":    url,
 			}).Info("Webhook notification sent successfully")
 			return
 		}
@@ -550,15 +605,15 @@ func (s *Server) sendWebhookNotification(topic, broker string, payload interface
 			resp.Body.Close()
 			s.logger.WithFields(map[string]interface{}{
 				"status": resp.StatusCode,
-				"url":    s.config.Webhook.URL,
+				"url":    url,
 			}).Error("Webhook notification failed")
 		}
 	}
 
 	s.logger.WithFields(map[string]interface{}{
-		"topic":       topic,
-		"broker":      broker,
-		"url":         s.config.Webhook.URL,
-		"retry_count": s.config.Webhook.RetryCount,
+		"topic":       webhookPayload.Topic,
+		"broker":      webhookPayload.Broker,
+		"url":         url,
+		"retry_count": retryCount,
 	}).Error("Webhook notification failed after retries")
 }

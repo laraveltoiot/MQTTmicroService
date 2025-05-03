@@ -525,9 +525,16 @@ For production deployment, consider the following:
 
 The microservice can send webhook notifications to your Laravel application when messages are received on subscribed topics. This allows your Laravel application to react to MQTT messages without having to poll the microservice.
 
-### Configuration
+The microservice supports two types of webhook configurations:
 
-Webhook notifications are configured using environment variables:
+1. **Global Webhook**: Configured using environment variables
+2. **Database Webhooks**: Created and managed via API endpoints (see [Webhook Management Endpoints](#webhook-management-endpoints))
+
+When a message is received on a subscribed topic, the microservice sends notifications to both the global webhook (if enabled) and any matching webhooks from the database.
+
+### Global Webhook Configuration
+
+The global webhook is configured using environment variables:
 
 ```
 WEBHOOK_ENABLED=true
@@ -538,12 +545,16 @@ WEBHOOK_RETRY_COUNT=3
 WEBHOOK_RETRY_DELAY=5
 ```
 
-- `WEBHOOK_ENABLED`: Set to `true` to enable webhook notifications
+- `WEBHOOK_ENABLED`: Set to `true` to enable global webhook notifications
 - `WEBHOOK_URL`: The URL to send webhook notifications to
 - `WEBHOOK_METHOD`: The HTTP method to use (default: `POST`)
 - `WEBHOOK_TIMEOUT`: The timeout for webhook requests in seconds (default: `10`)
 - `WEBHOOK_RETRY_COUNT`: The number of times to retry failed webhook requests (default: `3`)
 - `WEBHOOK_RETRY_DELAY`: The delay between retries in seconds (default: `5`)
+
+### Database Webhooks
+
+In addition to the global webhook, you can create and manage webhooks via API endpoints. These webhooks are stored in the database and can be configured to match specific MQTT topics using wildcards. See the [Webhook Management Endpoints](#webhook-management-endpoints) section for details on how to create and manage database webhooks.
 
 ### Webhook Payload
 

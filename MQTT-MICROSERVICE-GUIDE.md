@@ -595,9 +595,17 @@ curl -X DELETE http://localhost:8080/messages/confirmed
 
 The microservice can send webhook notifications to your Laravel application when messages are received on subscribed topics. This allows your Laravel application to react to MQTT messages without having to poll the microservice.
 
-### Webhook Configuration
+The microservice supports two types of webhook configurations:
 
-Webhook notifications are configured using environment variables:
+1. **Global Webhook**: Configured using environment variables
+2. **Database Webhooks**: Created and managed via API endpoints
+
+When a message is received on a subscribed topic, the microservice sends notifications 
+to both the global webhook (if enabled) and any matching webhooks from the database.
+
+### Global Webhook Configuration
+
+The global webhook is configured using environment variables:
 
 ```
 WEBHOOK_ENABLED=true
@@ -608,12 +616,56 @@ WEBHOOK_RETRY_COUNT=3
 WEBHOOK_RETRY_DELAY=5
 ```
 
-- `WEBHOOK_ENABLED`: Set to `true` to enable webhook notifications
+- `WEBHOOK_ENABLED`: Set to `true` to enable global webhook notifications
 - `WEBHOOK_URL`: The URL to send webhook notifications to
 - `WEBHOOK_METHOD`: The HTTP method to use (default: `POST`)
 - `WEBHOOK_TIMEOUT`: The timeout for webhook requests in seconds (default: `10`)
 - `WEBHOOK_RETRY_COUNT`: The number of times to retry failed webhook requests (default: `3`)
 - `WEBHOOK_RETRY_DELAY`: The delay between retries in seconds (default: `5`)
+
+### Database Webhooks
+
+In addition to the global webhook, you can create and manage webhooks via API endpoints. These webhooks are stored in the database and can be configured to match specific MQTT topics using wildcards.
+
+Database webhooks are managed using the following API endpoints:
+
+- `GET /webhooks`: List all webhooks
+- `GET /webhooks/{id}`: Get a specific webhook
+- `POST /webhooks`: Create a new webhook
+- `PUT /webhooks/{id}`: Update a webhook
+- `DELETE /webhooks/{id}`: Delete a webhook
+
+When creating a webhook, you can specify:
+
+- `name`: A descriptive name for the webhook
+- `url`: The URL to send webhook notifications to
+- `method`: The HTTP method to use (default: `POST`)
+- `topic_filter`: The MQTT topic filter to match (supports wildcards like `+` and `#`)
+- `enabled`: Whether the webhook is active (default: `true`)
+- `headers`: Custom HTTP headers to include in the webhook request
+- `timeout`: The timeout for webhook requests in seconds (default: `10`)
+- `retry_count`: The number of times to retry failed webhook requests (default: `3`)
+- `retry_delay`: The delay between retries in seconds (default: `5`)
+
+Example of creating a webhook:
+
+```bash
+curl -X POST http://localhost:8080/webhooks \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Temperature Webhook",
+    "url": "https://your-laravel-app.com/api/temperature",
+    "method": "POST",
+    "topic_filter": "sensors/+/temperature",
+    "enabled": true,
+    "headers": {
+      "X-API-Key": "your-api-key"
+    },
+    "timeout": 10,
+    "retry_count": 3,
+    "retry_delay": 5
+  }'
+```
 
 ### Webhook Payload Format
 
