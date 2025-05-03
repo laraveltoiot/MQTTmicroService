@@ -545,16 +545,22 @@ WEBHOOK_RETRY_COUNT=3
 WEBHOOK_RETRY_DELAY=5
 ```
 
-- `WEBHOOK_ENABLED`: Set to `true` to enable global webhook notifications
+- `WEBHOOK_ENABLED`: Set to `true` to enable global webhook notifications, or `false` to disable it
 - `WEBHOOK_URL`: The URL to send webhook notifications to
 - `WEBHOOK_METHOD`: The HTTP method to use (default: `POST`)
 - `WEBHOOK_TIMEOUT`: The timeout for webhook requests in seconds (default: `10`)
 - `WEBHOOK_RETRY_COUNT`: The number of times to retry failed webhook requests (default: `3`)
 - `WEBHOOK_RETRY_DELAY`: The delay between retries in seconds (default: `5`)
 
+> **Note**: The global webhook is optional. If you set `WEBHOOK_ENABLED=false` or don't set `WEBHOOK_URL`, the global webhook will be disabled, but database webhooks will still work.
+
 ### Database Webhooks
 
-In addition to the global webhook, you can create and manage webhooks via API endpoints. These webhooks are stored in the database and can be configured to match specific MQTT topics using wildcards. See the [Webhook Management Endpoints](#webhook-management-endpoints) section for details on how to create and manage database webhooks.
+In addition to or instead of the global webhook, you can create and manage webhooks via API endpoints. These webhooks are stored in the database and can be configured to match specific MQTT topics using wildcards. 
+
+You can use database webhooks exclusively by setting `WEBHOOK_ENABLED=false` in your environment variables, which is useful if you need different webhooks for different topics or want to manage webhooks dynamically without restarting the service.
+
+See the [Webhook Management Endpoints](#webhook-management-endpoints) section for details on how to create and manage database webhooks.
 
 ### Webhook Payload
 

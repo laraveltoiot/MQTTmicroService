@@ -616,16 +616,20 @@ WEBHOOK_RETRY_COUNT=3
 WEBHOOK_RETRY_DELAY=5
 ```
 
-- `WEBHOOK_ENABLED`: Set to `true` to enable global webhook notifications
+- `WEBHOOK_ENABLED`: Set to `true` to enable global webhook notifications, or `false` to disable it
 - `WEBHOOK_URL`: The URL to send webhook notifications to
 - `WEBHOOK_METHOD`: The HTTP method to use (default: `POST`)
 - `WEBHOOK_TIMEOUT`: The timeout for webhook requests in seconds (default: `10`)
 - `WEBHOOK_RETRY_COUNT`: The number of times to retry failed webhook requests (default: `3`)
 - `WEBHOOK_RETRY_DELAY`: The delay between retries in seconds (default: `5`)
 
+> **Note**: The global webhook is optional. If you set `WEBHOOK_ENABLED=false` or don't set `WEBHOOK_URL`, the global webhook will be disabled, but database webhooks will still work.
+
 ### Database Webhooks
 
-In addition to the global webhook, you can create and manage webhooks via API endpoints. These webhooks are stored in the database and can be configured to match specific MQTT topics using wildcards.
+In addition to or instead of the global webhook, you can create and manage webhooks via API endpoints. These webhooks are stored in the database and can be configured to match specific MQTT topics using wildcards.
+
+You can use database webhooks exclusively by setting `WEBHOOK_ENABLED=false` in your environment variables, which is useful if you need different webhooks for different topics or want to manage webhooks dynamically without restarting the service.
 
 Database webhooks are managed using the following API endpoints:
 
@@ -1035,7 +1039,14 @@ This ensures that messages are not lost if Laravel is temporarily unavailable, a
 
 The microservice can send webhook notifications to your Laravel application when messages are received on subscribed topics. This allows your Laravel application to react to MQTT messages without having to poll the microservice.
 
-To configure webhook notifications, set the following environment variables:
+The microservice supports two types of webhook configurations:
+
+1. **Global Webhook**: Configured using environment variables
+2. **Database Webhooks**: Created and managed via API endpoints
+
+#### Global Webhook Configuration
+
+To configure the global webhook, set the following environment variables:
 
 ```
 # Webhook settings
@@ -1047,14 +1058,22 @@ WEBHOOK_RETRY_COUNT=3
 WEBHOOK_RETRY_DELAY=5
 ```
 
-- `WEBHOOK_ENABLED`: Set to `true` to enable webhook notifications
+- `WEBHOOK_ENABLED`: Set to `true` to enable global webhook notifications, or `false` to disable it
 - `WEBHOOK_URL`: The URL to send webhook notifications to
 - `WEBHOOK_METHOD`: The HTTP method to use (default: `POST`)
 - `WEBHOOK_TIMEOUT`: The timeout for webhook requests in seconds (default: `10`)
 - `WEBHOOK_RETRY_COUNT`: The number of times to retry failed webhook requests (default: `3`)
 - `WEBHOOK_RETRY_DELAY`: The delay between retries in seconds (default: `5`)
 
-When a message is received on a subscribed topic, the microservice will send a webhook notification to the configured URL with a JSON payload containing the message details. See the [Webhook Notifications](#webhook-notifications) section for more information.
+> **Note**: The global webhook is optional. If you set `WEBHOOK_ENABLED=false` or don't set `WEBHOOK_URL`, the global webhook will be disabled, but database webhooks will still work.
+
+#### Database Webhooks
+
+In addition to or instead of the global webhook, you can create and manage webhooks via API endpoints. These webhooks are stored in the database and can be configured to match specific MQTT topics using wildcards.
+
+You can use database webhooks exclusively by setting `WEBHOOK_ENABLED=false` in your environment variables, which is useful if you need different webhooks for different topics or want to manage webhooks dynamically without restarting the service.
+
+See the [Webhook Notifications](#webhook-notifications) section for more information on how to create and manage database webhooks.
 
 ## Authentication
 
@@ -1237,11 +1256,18 @@ curl -X GET "http://localhost:8080/messages" \
 - Check the logs for specific error messages
 
 **Issue: Webhook notifications not being sent**
-- Verify that webhook notifications are enabled (`WEBHOOK_ENABLED=true`)
-- Check that the webhook URL is correctly configured (`WEBHOOK_URL`)
-- Ensure the webhook URL is accessible from the microservice
-- Check the logs for webhook-related errors
-- Verify that your Laravel application is correctly handling the webhook requests
+- For global webhook:
+  - Verify that global webhook notifications are enabled (`WEBHOOK_ENABLED=true`)
+  - Check that the webhook URL is correctly configured (`WEBHOOK_URL`)
+  - Ensure the webhook URL is accessible from the microservice
+- For database webhooks:
+  - Verify that you have created webhooks via the API and they are enabled
+  - Check that the webhook topic filters match the topics you're publishing to
+  - Ensure the webhook URLs are accessible from the microservice
+- General webhook troubleshooting:
+  - Check the logs for webhook-related errors
+  - Verify that your Laravel application is correctly handling the webhook requests
+  - Note that database webhooks will work even if the global webhook is disabled
 
 **Issue: Webhook notifications failing with timeout errors**
 - Check that the webhook URL is responding within the configured timeout (`WEBHOOK_TIMEOUT`)

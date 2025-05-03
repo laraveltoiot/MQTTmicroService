@@ -464,13 +464,21 @@ func (s *SQLiteDatabase) GetWebhooks(ctx context.Context, limit int) ([]*models.
 		}
 
 		// Parse timestamps
-		webhook.CreatedAt, err = time.Parse("2006-01-02 15:04:05", createdAt)
+		webhook.CreatedAt, err = time.Parse(time.RFC3339, createdAt)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse created_at timestamp: %w", err)
+			// Try the old format as fallback
+			webhook.CreatedAt, err = time.Parse("2006-01-02 15:04:05", createdAt)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse created_at timestamp: %w", err)
+			}
 		}
-		webhook.UpdatedAt, err = time.Parse("2006-01-02 15:04:05", updatedAt)
+		webhook.UpdatedAt, err = time.Parse(time.RFC3339, updatedAt)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse updated_at timestamp: %w", err)
+			// Try the old format as fallback
+			webhook.UpdatedAt, err = time.Parse("2006-01-02 15:04:05", updatedAt)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse updated_at timestamp: %w", err)
+			}
 		}
 
 		// Set the boolean fields
@@ -523,13 +531,21 @@ func (s *SQLiteDatabase) GetWebhookByID(ctx context.Context, id string) (*models
 
 	// Parse timestamps
 	var err error
-	webhook.CreatedAt, err = time.Parse("2006-01-02 15:04:05", createdAt)
+	webhook.CreatedAt, err = time.Parse(time.RFC3339, createdAt)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse created_at timestamp: %w", err)
+		// Try the old format as fallback
+		webhook.CreatedAt, err = time.Parse("2006-01-02 15:04:05", createdAt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse created_at timestamp: %w", err)
+		}
 	}
-	webhook.UpdatedAt, err = time.Parse("2006-01-02 15:04:05", updatedAt)
+	webhook.UpdatedAt, err = time.Parse(time.RFC3339, updatedAt)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse updated_at timestamp: %w", err)
+		// Try the old format as fallback
+		webhook.UpdatedAt, err = time.Parse("2006-01-02 15:04:05", updatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse updated_at timestamp: %w", err)
+		}
 	}
 
 	// Set the boolean fields
@@ -647,13 +663,21 @@ func (s *SQLiteDatabase) GetWebhooksByTopicFilter(ctx context.Context, topic str
 		}
 
 		// Parse timestamps
-		webhook.CreatedAt, err = time.Parse("2006-01-02 15:04:05", createdAt)
+		webhook.CreatedAt, err = time.Parse(time.RFC3339, createdAt)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse created_at timestamp: %w", err)
+			// Try the old format as fallback
+			webhook.CreatedAt, err = time.Parse("2006-01-02 15:04:05", createdAt)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse created_at timestamp: %w", err)
+			}
 		}
-		webhook.UpdatedAt, err = time.Parse("2006-01-02 15:04:05", updatedAt)
+		webhook.UpdatedAt, err = time.Parse(time.RFC3339, updatedAt)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse updated_at timestamp: %w", err)
+			// Try the old format as fallback
+			webhook.UpdatedAt, err = time.Parse("2006-01-02 15:04:05", updatedAt)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse updated_at timestamp: %w", err)
+			}
 		}
 
 		// Set the boolean fields
