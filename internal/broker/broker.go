@@ -11,6 +11,7 @@ import (
 	mqtt "github.com/mochi-mqtt/server/v2"
 	"github.com/mochi-mqtt/server/v2/hooks/auth"
 	"github.com/mochi-mqtt/server/v2/listeners"
+	"github.com/mochi-mqtt/server/v2/packets"
 )
 
 // Config holds the configuration for the MQTT broker
@@ -45,6 +46,41 @@ type Broker struct {
 	server  *mqtt.Server
 	mu      sync.RWMutex
 	running bool
+}
+
+// LoggingHook is a custom hook for logging MQTT messages
+type LoggingHook struct {
+	mqtt.HookBase
+	logger *logger.Logger
+}
+
+// ID returns the ID of the hook
+func (h *LoggingHook) ID() string {
+	return "logging-hook"
+}
+
+// OnPublish logs the publish event
+func (h *LoggingHook) OnPublish(cl *mqtt.Client, pk packets.Packet) (packets.Packet, error) {
+	if cl != nil {
+		h.logger.WithFields(map[string]interface{}{
+			"client_id": cl.ID,
+			"topic":     pk.TopicName,
+			"qos":       pk.FixedHeader.Qos,
+			"payload":   string(pk.Payload),
+		}).Info("Broker received message")
+	}
+	return pk, nil
+}
+
+// OnPublished logs the published event
+func (h *LoggingHook) OnPublished(cl *mqtt.Client, pk packets.Packet) {
+	if cl != nil {
+		h.logger.WithFields(map[string]interface{}{
+			"client_id": cl.ID,
+			"topic":     pk.TopicName,
+			"qos":       pk.FixedHeader.Qos,
+		}).Info("Broker published message")
+	}
 }
 
 // New creates a new MQTT broker
@@ -87,11 +123,45 @@ func (b *Broker) Start() error {
 		// Create a simple authentication hook
 		authHook := &auth.Hook{}
 
-		// Register the auth hook
-		err := b.server.AddHook(authHook, nil)
+		// Create a ledger for authentication
+		ledger := &auth.Ledger{
+			Users: make(auth.Users),
+		}
+
+		// Add credentials to the ledger
+		for username, password := range b.config.Credentials {
+			ledger.Users[username] = auth.UserRule{
+				Username: auth.RString(username),
+				Password: auth.RString(password),
+				Disallow: false,
+			}
+			b.logger.WithFields(map[string]interface{}{
+				"username": username,
+			}).Info("Registering user for MQTT broker authentication")
+		}
+
+		// Create options for the auth hook
+		authOpts := &auth.Options{
+			Ledger: ledger,
+		}
+
+		// Register the auth hook with options
+		err := b.server.AddHook(authHook, authOpts)
 		if err != nil {
 			return fmt.Errorf("failed to add auth hook: %w", err)
 		}
+	}
+
+	// Add logging hook
+	if b.config.EnableLogging {
+		loggingHook := &LoggingHook{
+			logger: b.logger,
+		}
+		err := b.server.AddHook(loggingHook, nil)
+		if err != nil {
+			return fmt.Errorf("failed to add logging hook: %w", err)
+		}
+		b.logger.Info("Message logging enabled for MQTT broker")
 	}
 
 	// Create TCP listener

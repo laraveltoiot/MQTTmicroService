@@ -159,7 +159,7 @@ func main() {
 			AuthEnable:     cfg.MQTTBroker.AuthEnable,
 			AllowAnonymous: cfg.MQTTBroker.AllowAnonymous,
 			Credentials:    cfg.MQTTBroker.Credentials,
-			EnableLogging:  true,
+			EnableLogging:  cfg.MQTTBroker.EnableLogging,
 		}
 
 		var err error

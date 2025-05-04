@@ -78,6 +78,8 @@ type MQTTBrokerConfig struct {
 	AuthEnable     bool
 	AllowAnonymous bool
 	Credentials    map[string]string
+	// Logging
+	EnableLogging bool
 }
 
 // Config holds the configuration for the MQTT microservice
@@ -283,6 +285,9 @@ func LoadConfig() (*Config, error) {
 	// Process broker authentication settings
 	config.MQTTBroker.AuthEnable = os.Getenv("MQTT_BROKER_AUTH_ENABLED") == "true"
 	config.MQTTBroker.AllowAnonymous = os.Getenv("MQTT_BROKER_ALLOW_ANONYMOUS") == "true"
+
+	// Process broker logging settings
+	config.MQTTBroker.EnableLogging = os.Getenv("MQTT_BROKER_LOGGING_ENABLED") == "true"
 
 	// Parse broker credentials
 	brokerCredentials := os.Getenv("MQTT_BROKER_CREDENTIALS")
