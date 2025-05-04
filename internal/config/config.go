@@ -62,6 +62,24 @@ type WebhookConfig struct {
 	RetryDelay int
 }
 
+// MQTTBrokerConfig holds the configuration for the MQTT broker
+type MQTTBrokerConfig struct {
+	// Enable indicates whether the broker is enabled
+	Enable bool
+	// Host is the hostname or IP address to bind to
+	Host string
+	// Port is the port to listen on
+	Port int
+	// TLS configuration
+	TLSEnable   bool
+	TLSCertFile string
+	TLSKeyFile  string
+	// Authentication
+	AuthEnable     bool
+	AllowAnonymous bool
+	Credentials    map[string]string
+}
+
 // Config holds the configuration for the MQTT microservice
 type Config struct {
 	DefaultConnection string
@@ -73,6 +91,8 @@ type Config struct {
 	Database *DatabaseConfig
 	// Webhook configuration
 	Webhook *WebhookConfig
+	// MQTT Broker configuration
+	MQTTBroker *MQTTBrokerConfig
 }
 
 // LoadConfig loads the configuration from environment variables
@@ -81,9 +101,10 @@ func LoadConfig() (*Config, error) {
 	_ = godotenv.Load()
 
 	config := &Config{
-		Brokers:  make(map[string]*BrokerConfig),
-		Database: &DatabaseConfig{},
-		Webhook:  &WebhookConfig{},
+		Brokers:    make(map[string]*BrokerConfig),
+		Database:   &DatabaseConfig{},
+		Webhook:    &WebhookConfig{},
+		MQTTBroker: &MQTTBrokerConfig{},
 	}
 
 	// Get default connection
@@ -232,6 +253,51 @@ func LoadConfig() (*Config, error) {
 	}
 	if config.Webhook.RetryDelay == 0 {
 		config.Webhook.RetryDelay = 5 // Default to 5 seconds if not specified or invalid
+	}
+
+	// Process MQTT broker settings
+	brokerEnabled := os.Getenv("MQTT_BROKER_ENABLED") == "true"
+	config.MQTTBroker.Enable = brokerEnabled
+	config.MQTTBroker.Host = os.Getenv("MQTT_BROKER_HOST")
+	if config.MQTTBroker.Host == "" {
+		config.MQTTBroker.Host = "0.0.0.0" // Default to all interfaces if not specified
+	}
+
+	// Parse broker port
+	brokerPortStr := os.Getenv("MQTT_BROKER_PORT")
+	if brokerPortStr != "" {
+		brokerPort, err := strconv.Atoi(brokerPortStr)
+		if err == nil && brokerPort > 0 {
+			config.MQTTBroker.Port = brokerPort
+		}
+	}
+	if config.MQTTBroker.Port == 0 {
+		config.MQTTBroker.Port = 1883 // Default to standard MQTT port if not specified or invalid
+	}
+
+	// Process broker TLS settings
+	config.MQTTBroker.TLSEnable = os.Getenv("MQTT_BROKER_TLS_ENABLED") == "true"
+	config.MQTTBroker.TLSCertFile = os.Getenv("MQTT_BROKER_TLS_CERT_FILE")
+	config.MQTTBroker.TLSKeyFile = os.Getenv("MQTT_BROKER_TLS_KEY_FILE")
+
+	// Process broker authentication settings
+	config.MQTTBroker.AuthEnable = os.Getenv("MQTT_BROKER_AUTH_ENABLED") == "true"
+	config.MQTTBroker.AllowAnonymous = os.Getenv("MQTT_BROKER_ALLOW_ANONYMOUS") == "true"
+
+	// Parse broker credentials
+	brokerCredentials := os.Getenv("MQTT_BROKER_CREDENTIALS")
+	if brokerCredentials != "" {
+		credentials := make(map[string]string)
+		credentialPairs := strings.Split(brokerCredentials, ",")
+		for _, pair := range credentialPairs {
+			parts := strings.SplitN(pair, ":", 2)
+			if len(parts) == 2 {
+				credentials[parts[0]] = parts[1]
+			}
+		}
+		config.MQTTBroker.Credentials = credentials
+	} else {
+		config.MQTTBroker.Credentials = make(map[string]string)
 	}
 
 	// Apply TLS and auth settings to all brokers

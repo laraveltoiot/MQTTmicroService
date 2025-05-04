@@ -14,6 +14,7 @@ offloading the MQTT layer from the Laravel app.
 - Webhook notifications for received messages
 - Health check endpoint
 - Comprehensive logging
+- Built-in MQTT broker functionality (can act as both client and broker)
 
 ## Architecture
 
@@ -52,6 +53,9 @@ The microservice is built with a clean, modular architecture:
 - `PUT /webhooks/{id}`: Update a webhook
 - `DELETE /webhooks/{id}`: Delete a webhook
 
+### MQTT Broker Endpoints
+- `GET /broker/status`: Get the status of the built-in MQTT broker
+
 ## Environment Variables
 
 The microservice is configured using environment variables. Example:
@@ -86,6 +90,17 @@ WEBHOOK_METHOD=POST
 WEBHOOK_TIMEOUT=10
 WEBHOOK_RETRY_COUNT=3
 WEBHOOK_RETRY_DELAY=5
+
+# MQTT Broker settings
+MQTT_BROKER_ENABLED=true
+MQTT_BROKER_HOST=0.0.0.0
+MQTT_BROKER_PORT=1883
+MQTT_BROKER_TLS_ENABLED=false
+MQTT_BROKER_TLS_CERT_FILE=certificates/server.crt
+MQTT_BROKER_TLS_KEY_FILE=certificates/server.key
+MQTT_BROKER_AUTH_ENABLED=false
+MQTT_BROKER_ALLOW_ANONYMOUS=true
+MQTT_BROKER_CREDENTIALS=user1:password1,user2:password2
 ```
 
 ## Installation

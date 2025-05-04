@@ -32,6 +32,7 @@ type Server struct {
 	db          database.Database
 	server      *http.Server
 	config      *config.Config
+	mqttBroker  interface{} // Using interface{} to avoid circular imports
 }
 
 // PublishRequest represents a request to publish a message
@@ -73,7 +74,7 @@ type WebhookPayload struct {
 }
 
 // NewServer creates a new HTTP API server
-func NewServer(mqttManager *mqtt.Manager, log *logger.Logger, metricsCollector *metrics.Metrics, authService *auth.Auth, db database.Database, cfg *config.Config, addr string) *Server {
+func NewServer(mqttManager *mqtt.Manager, log *logger.Logger, metricsCollector *metrics.Metrics, authService *auth.Auth, db database.Database, cfg *config.Config, mqttBroker interface{}, addr string) *Server {
 	router := mux.NewRouter()
 
 	server := &Server{
@@ -84,6 +85,7 @@ func NewServer(mqttManager *mqtt.Manager, log *logger.Logger, metricsCollector *
 		auth:        authService,
 		db:          db,
 		config:      cfg,
+		mqttBroker:  mqttBroker,
 		server: &http.Server{
 			Addr:         addr,
 			Handler:      router,
@@ -120,6 +122,7 @@ func (s *Server) setupRoutes() {
 	s.router.HandleFunc("/healthz", s.handleHealthCheck).Methods("GET")
 	s.router.HandleFunc("/metrics", s.handleMetrics).Methods("GET")
 	s.router.HandleFunc("/logs", s.handleLogs).Methods("GET")
+	s.router.HandleFunc("/broker/status", s.handleBrokerStatus).Methods("GET")
 
 	// Database-related endpoints
 	if s.db != nil {
@@ -456,6 +459,39 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain")
 	w.WriteHeader(http.StatusOK)
 	w.Write(logData)
+}
+
+// handleBrokerStatus handles requests to get the status of the MQTT broker
+func (s *Server) handleBrokerStatus(w http.ResponseWriter, r *http.Request) {
+	// Check if broker is initialized
+	if s.mqttBroker == nil {
+		s.writeJSON(w, http.StatusOK, map[string]interface{}{
+			"status":  "not_available",
+			"message": "MQTT broker is not initialized",
+		})
+		return
+	}
+
+	// Try to get broker status using type assertion
+	type BrokerStatusProvider interface {
+		GetStatus() map[string]interface{}
+		IsRunning() bool
+	}
+
+	if broker, ok := s.mqttBroker.(BrokerStatusProvider); ok {
+		status := broker.GetStatus()
+		s.writeJSON(w, http.StatusOK, map[string]interface{}{
+			"status": "ok",
+			"broker": status,
+		})
+		return
+	}
+
+	// If type assertion fails, return a generic response
+	s.writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status":  "unknown",
+		"message": "Unable to get broker status",
+	})
 }
 
 // writeJSON writes a JSON response

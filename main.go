@@ -11,6 +11,7 @@ import (
 
 	"MQTTmicroService/internal/api"
 	"MQTTmicroService/internal/auth"
+	"MQTTmicroService/internal/broker"
 	"MQTTmicroService/internal/config"
 	"MQTTmicroService/internal/database"
 	"MQTTmicroService/internal/logger"
@@ -144,8 +145,49 @@ func main() {
 
 	log.WithField("broker", cfg.DefaultConnection).Info("Connected to default MQTT broker")
 
+	// Initialize MQTT broker if enabled
+	var mqttBroker *broker.Broker
+	if cfg.MQTTBroker != nil && cfg.MQTTBroker.Enable {
+		// Convert config.MQTTBrokerConfig to broker.Config
+		brokerConfig := &broker.Config{
+			Enable:         cfg.MQTTBroker.Enable,
+			Host:           cfg.MQTTBroker.Host,
+			Port:           cfg.MQTTBroker.Port,
+			TLSEnable:      cfg.MQTTBroker.TLSEnable,
+			TLSCertFile:    cfg.MQTTBroker.TLSCertFile,
+			TLSKeyFile:     cfg.MQTTBroker.TLSKeyFile,
+			AuthEnable:     cfg.MQTTBroker.AuthEnable,
+			AllowAnonymous: cfg.MQTTBroker.AllowAnonymous,
+			Credentials:    cfg.MQTTBroker.Credentials,
+			EnableLogging:  true,
+		}
+
+		var err error
+		mqttBroker, err = broker.New(brokerConfig, log)
+		if err != nil {
+			log.WithError(err).Fatal("Failed to create MQTT broker")
+		}
+
+		// Start the broker
+		if err := mqttBroker.Start(); err != nil {
+			log.WithError(err).Fatal("Failed to start MQTT broker")
+		}
+		defer func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := mqttBroker.Stop(ctx); err != nil {
+				log.WithError(err).Error("Failed to stop MQTT broker")
+			}
+		}()
+
+		log.WithFields(map[string]interface{}{
+			"host": cfg.MQTTBroker.Host,
+			"port": cfg.MQTTBroker.Port,
+		}).Info("MQTT broker started")
+	}
+
 	// Initialize HTTP API server
-	apiServer := api.NewServer(mqttManager, log, metricsCollector, authService, db, cfg, *httpAddr)
+	apiServer := api.NewServer(mqttManager, log, metricsCollector, authService, db, cfg, mqttBroker, *httpAddr)
 
 	// Start HTTP server in a goroutine
 	go func() {
